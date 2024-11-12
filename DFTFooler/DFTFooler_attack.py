@@ -242,46 +242,65 @@ def save_stat(article_cache, current_article, perturb_stat, csv_file1, csv_file2
         csvwriter.writerow([perturb_idxs, perturb_word_pairs])
 
 
+# 定义一个名为call_attack的函数，它接收多个参数用于执行对文章的攻击操作
 def call_attack(args, article_cache, current_article, stop_words_set,
-                     word2idx, idx2word,
-                     cos_sim,
-                     sim_predictor, lm, perturb_stat):
+                word2idx, idx2word,
+                cos_sim,
+                sim_predictor, lm, perturb_stat):
+    # 从当前文章中获取单词的排名统计信息
     word_map = get_rank_stat_from_an_article(current_article, lm, args.backend_model)
+    # 获取文章缓存的长度，即文章的单词数量（假设article_cache是单词列表）
     len_text = len(article_cache)
 
+    # 初始化一个空列表，用于存储候选单词及其相关信息
     candidate_set = []
+    # 遍历word_map中的每个单词及其相关信息
     for idx, i in enumerate(word_map):
+        # 确保索引和枚举值相等（这里实际上可能是多余的，因为enumerate已经保证了这一点）
         assert idx == i
+        # 获取单词的概率信息（假设是单词出现概率或某种相关性的度量）
         prob_info = word_map[i][-2]
+        # 获取单词本身
         word = word_map[i][0]
+        # 如果概率信息非空、单词不在停用词集中，并且单词在单词到索引的映射中存在
         if len(prob_info) > 0 and word not in stop_words_set and word in word2idx:
+            # 将单词及其索引和概率信息添加到候选集中
             candidate_set.append((idx, word, prob_info[0]))
+    # 根据概率信息对候选集进行降序排序
     candidate_set = sorted(candidate_set, key=lambda x: x[2], reverse=True)
 
+    # 初始化替换计数器
     num_replacement = 0
+    # 当候选集不为空且替换次数未达到最大迭代次数时继续循环
     while len(candidate_set) > 0:
         if num_replacement == args.max_iter: break
+        # 从候选集中弹出（移除并返回）第一个元素（索引、单词、概率）
         idx, word, prob = candidate_set.pop(0)
+        # 创建一个包含要扰动单词索引的列表
         words_perturb_idx = [word2idx[word]]
-        synonyms, sim_values = pick_most_similar_words_batch(words_perturb_idx, cos_sim, idx2word, 50,
-                                                             0.7)
-        filtered_synonyms = sentence_similarity_filter(current_article, synonyms, sim_values,
-                                                       len_text, idx, sim_predictor,
-                                                       15, args.sim_thre)
+        # 从余弦相似度模型中批量选取最相似的单词及其相似度值
+        synonyms, sim_values = pick_most_similar_words_batch(words_perturb_idx, cos_sim, idx2word, 50, 0.7)
+        # 使用句子相似度过滤器对同义词进行过滤
+        filtered_synonyms = sentence_similarity_filter(current_article, synonyms, sim_values, len_text, idx, sim_predictor, 15, args.sim_thre)
+        # 初始化用于替换的同义词（默认为空字符串）
         synonym_to_alter = ''
-        synonym_to_alter = query_min_prob_fast(article_cache, current_article, idx, filtered_synonyms,
-                                                    len_text, lm,
-                                                    args.low_prob_thre, args.backend_model)
+        # 查询并获取最符合要求的同义词（基于某种概率或相似度度量）
+        synonym_to_alter = query_min_prob_fast(article_cache, current_article, idx, filtered_synonyms, len_text, lm, args.low_prob_thre, args.backend_model)
 
+        # 如果找到的同义词为空或无效，则跳过当前迭代
         if len(synonym_to_alter) < 1 or synonym_to_alter == '': continue
 
+        # 将原始单词、替换的同义词及其索引添加到扰动统计中
         perturb_stat.append((current_article[idx], synonym_to_alter, idx))
 
+        # 使用找到的同义词替换当前文章中的单词
         current_article = current_article[:idx] + [synonym_to_alter] + current_article[min(idx + 1, len_text):]
+        # 替换计数器加1
         num_replacement += 1
 
-    save_stat(article_cache, current_article, perturb_stat, args.attack_stat_csv1, args.attack_stat_csv2,
-              num_replacement)
+    # 保存攻击统计信息到CSV文件（假设有两个CSV文件用于记录不同信息）
+    save_stat(article_cache, current_article, perturb_stat, args.attack_stat_csv1, args.attack_stat_csv2, num_replacement)
+    # 返回替换次数和修改后的文章
     return num_replacement, current_article
 
 
